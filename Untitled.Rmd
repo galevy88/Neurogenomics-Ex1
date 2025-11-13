@@ -1,0 +1,89 @@
+---
+title: "EX1"
+output: html_notebook
+---
+
+Part 1 - General Intorduction to sequencing data
+
+Question: Can you explain why we can only get an estimation of the expression levels and not the actual number of RNA molecules for each gene?
+
+Answer:
+Based on the study, sequencing results are estimates rather than exact counts because the PCR process distorts the original molecule numbers through three main mechanisms. First, PCR bias causes sequences with high GC content to be underrepresented, as factors like higher melting points lead to lower amplification efficiency. Second, PCR is stochastic rather than perfect; because replication is probabilistic, random failures to amplify during the critical early cycles can drastically reduce the final representation of low-abundance sequences compared to those that amplify successfully. Finally, the data is further altered by the introduction of false sequences caused by polymerase errors and template switches.
+
+
+Part 2 - Explore sequncing data using R
+
+```{r}
+## Install the package 'pasilla'
+# copy and paste the lines below into R (if prompted - choose ‘Update all’)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install("pasilla")
+```
+
+```{r}
+## Use the installed library
+# copy and paste the line below into R
+library("pasilla")
+```
+
+```{r}
+## Load the actual data from the pasilla package
+# copy and paste the lines below into R
+pasCts <- system.file("extdata",
+"pasilla_gene_counts.tsv",
+package="pasilla", mustWork=TRUE)
+pasAnno <- system.file("extdata",
+"pasilla_sample_annotation.csv",
+package="pasilla", mustWork=TRUE)
+cts <- as.matrix(read.csv(pasCts,sep="\t",row.names="gene_id"))
+coldata <- read.csv(pasAnno, row.names=1)
+coldata <- coldata[,c("condition","type")]
+rownames(coldata) <- sub("fb", "", rownames(coldata))
+cts <- cts[, rownames(coldata)]
+```
+
+
+Examine the first 10 lines of this matrix.
+```{r}
+head(cts, n= 10)
+```
+Question: what kind of information is in the matrix?
+Answer: The matrix displays raw sequencing read counts representing gene expression levels, where the rows correspond to individual gene identifiers and the columns represent the distinct biological samples from treated and untreated experimental conditions.
+
+```{r}
+nrow(cts)
+```
+
+```{r}
+cts_dimensions <- dim(cts)
+print(cts_dimensions)
+```
+
+```{r}
+colSums(cts)
+```
+
+Question: Is the sum of reads the same for each one of the samples
+Answer: No
+
+
+Creating a normalized version of the cts matrix
+```{r}
+cts_normlized <- cts
+for (i in 2:ncol(cts)){
+  cts_normlized[,i] <- cts_normlized[,i] * (sum(cts_normlized[,1])/sum(cts_normlized[,i]))
+}
+```
+
+Making sure that in the normalized matrix the sum of reads is the same in all samples
+```{r}
+colSums(cts_normlized)
+```
+
+```{r}
+head(cts_normlized, n= 10)
+```
+
+
+Part 3 - Basic statistics of sequencing data
