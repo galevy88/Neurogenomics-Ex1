@@ -1,0 +1,475 @@
+---
+title: "EX1"
+output:
+  html_document:
+    df_print: paged
+---
+
+Part 1 - General Intorduction to sequencing data
+
+Question: Can you explain why we can only get an estimation of the expression levels and not the actual number of RNA molecules for each gene?
+
+Answer:
+Based on the study, sequencing results are estimates rather than exact counts because the PCR process distorts the original molecule numbers through three main mechanisms. First, PCR bias causes sequences with high GC content to be underrepresented, as factors like higher melting points lead to lower amplification efficiency. Second, PCR is stochastic rather than perfect; because replication is probabilistic, random failures to amplify during the critical early cycles can drastically reduce the final representation of low-abundance sequences compared to those that amplify successfully. Finally, the data is further altered by the introduction of false sequences caused by polymerase errors and template switches.
+
+
+Part 2 - Explore sequncing data using R
+
+```{r}
+## Install the package 'pasilla'
+# copy and paste the lines below into R (if prompted - choose ‘Update all’)
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#install.packages("BiocManager")
+#BiocManager::install("pasilla")
+```
+
+```{r}
+## Use the installed library
+# copy and paste the line below into R
+library("pasilla")
+```
+
+```{r}
+## Load the actual data from the pasilla package
+# copy and paste the lines below into R
+pasCts <- system.file("extdata",
+"pasilla_gene_counts.tsv",
+package="pasilla", mustWork=TRUE)
+pasAnno <- system.file("extdata",
+"pasilla_sample_annotation.csv",
+package="pasilla", mustWork=TRUE)
+cts <- as.matrix(read.csv(pasCts,sep="\t",row.names="gene_id"))
+coldata <- read.csv(pasAnno, row.names=1)
+coldata <- coldata[,c("condition","type")]
+rownames(coldata) <- sub("fb", "", rownames(coldata))
+cts <- cts[, rownames(coldata)]
+```
+
+
+Examine the first 10 lines of this matrix.
+```{r}
+head(cts, n= 10)
+```
+Question: what kind of information is in the matrix?
+Answer: The matrix displays raw sequencing read counts representing gene expression levels, where the rows correspond to individual gene identifiers and the columns represent the distinct biological samples from treated and untreated experimental conditions.
+
+```{r}
+nrow(cts)
+```
+
+```{r}
+cts_dimensions <- dim(cts)
+print(cts_dimensions)
+```
+
+```{r}
+colSums(cts)
+```
+
+Question: Is the sum of reads the same for each one of the samples
+Answer: No
+
+
+Creating a normalized version of the cts matrix
+```{r}
+cts_normlized <- cts
+for (i in 2:ncol(cts)){
+  cts_normlized[,i] <- cts_normlized[,i] * (sum(cts_normlized[,1])/sum(cts_normlized[,i]))
+}
+```
+
+Making sure that in the normalized matrix the sum of reads is the same in all samples
+```{r}
+colSums(cts_normlized)
+```
+
+```{r}
+head(cts_normlized, n= 10)
+```
+
+
+Part 3 - Basic statistics of sequencing data
+```{r}
+## Does the data fit a Poisson distribution?
+# recall that the variance of the Poisson distribution is equal to its mean
+# first calculate the variance and the mean in the expression of each gene for the untreated conditions
+# then log transform the variance and mean (because the resulting values span multiple orders of magnitude). Tip: add 1 to all the values to avoid log of 0.
+# plot the variance vs the mean. Add the line x=y to your plot. The line represents a perfect Poisson distribution
+
+
+unt_cols <- grep("untreated", colnames(cts_normlized), value = TRUE)
+
+# mean and variance
+mean_unt <- rowMeans(cts_normlized[, unt_cols])
+var_unt  <- apply(cts_normlized[, unt_cols], 1, var)
+
+
+# log
+log_mean_unt <- log10(mean_unt + 1)
+log_var_unt  <- log10(var_unt + 1)
+
+# plot
+plot(log_mean_unt, log_var_unt,
+     xlab = "mean (log10()+1)",
+     ylab = "variance (log10()+1)",
+     main = "Poisson&Untreated:Variance vs Mean",
+     pch = 16, cex = 0.6)
+
+# x=y
+abline(a = 0, b = 1, col = "red", lwd = 2)
+
+```
+Answer: The data does not fit a Poisson distribution because the variance and mean are not the same, the variance is greater than the mean.
+```{r}
+# In Negative binomial distribution the relationship between the variance and the mean is: variance = mean + a*mean 2 where ‘a’ is the dispersion parameter, a measure of how dispersed are the data compared to the Poisson distribution
+# use the nls function to fit a curve of variance = mean + a*mean^2 to the log transformed variance and mean. Tip - set the initial guess of the value of a to 0.
+# plot the resulting fitted curve on the variance vs mean plot
+
+df_unt <- data.frame(
+  log_mean=log_mean_unt,
+  log_variance=log_var_unt)
+
+fit <- nls(log_variance ~ log_mean + a*log_mean^2, data = df_unt, start = list(a=0))
+
+plot(df_unt$log_mean, 
+     df_unt$log_variance, xlab = "mean (log10()+1)", 
+     ylab = "variance (log10()+1)", 
+     main = "Untreated — NB fit",
+     pch = 16, cex = 0.6)
+
+lines(df_unt$log_mean,predict(fit),type = "p",col="red", cex = 0.5)
+```
+
+Answer: The data fit the Negative binomial distribution.
+
+```{r}
+## What is the value of the dispersion parameter?
+a<-exp(coef(fit)["a"])
+a
+```
+
+Perform the same analysis (including the plots) for the treated samples. What is the dispersion parameter?
+
+```{r}
+#Poisson dispersion
+
+unt_cols <- grep("treated", colnames(cts_normlized), value = TRUE)
+
+# mean and variance
+mean_treat <- rowMeans(cts_normlized[, unt_cols])
+var_treat  <- apply(cts_normlized[, unt_cols], 1, var)
+
+
+# log
+log_mean_treat <- log10(mean_treat + 1)
+log_var_treat  <- log10(var_treat + 1)
+
+# plot
+plot(log_mean_treat, log_var_treat,
+     xlab = "mean (log10()+1)",
+     ylab = "variance (log10()+1)",
+     main = "Poisson&Treated:Variance vs Mean",
+     pch = 16, cex = 0.6)
+
+# x=y
+abline(a = 0, b = 1, col = "red", lwd = 2)
+
+#Negative binomial distribution 
+
+df_treat <- data.frame(
+  log_mean=log_mean_treat,
+  log_variance=log_var_treat)
+
+fit <- nls(log_variance ~ log_mean + a*log_mean^2, data = df_unt, start = list(a=0))
+
+plot(df_treat$log_mean, 
+     df_treat$log_variance, xlab = "mean (log10()+1)", 
+     ylab = "variance (log10()+1)", 
+     main = "Treated — NB fit",
+     pch = 16, cex = 0.6)
+
+lines(df_unt$log_mean,predict(fit),type = "p",col="red", cex = 0.5)
+
+a <- exp(coef(fit)["a"])
+a
+
+```
+Read about the statistics of sequencing experiments:
+Why sequencing data is modeled as negative binomial
+Judging by the results obtained, do you think that the different untreated and treated samples in
+this experiment are technical or biological repeats?
+
+Answer: Sequencing data fit a negative binomial (NB) distribution because they show greater variance than what a Poisson distribution allows. The NB distribution is essentially similar to Poisson, but it allows for additional variability.
+
+Based on the results, in my opinion the samples in the experiment are biological replicates, showing high variability that aligns better with an NB distribution.
+
+
+part 4 - Detect differentially expressed genes
+```{r}
+## Using visual inspection, detect at least one gene that has different expression levels in the first treated sample compared to the first untreated sample
+# The first step is to plot the log of expression in one sample against the log of expression in the other sample (log transformation is used because the resulting values span multiple orders of magnitude)
+# Then use the obtained plot to visually locate gene(s) that has strikingly different expression level in the two conditions
+# Characterize the expression of the gene(s) you selected using a grid-like manner: for example, gene(s) that has expression levels higher than value X in the treated condition, and lower than expression Y in the untreated condition
+# Use the grid-like characterization to computationally detect the name of the gene(s)
+d<- data.frame(
+  treated1=log(cts_normlized[,"treated1"]+1),
+  untreated1=log(cts_normlized[,"untreated1"]+1))
+
+plot(d$treated1, d$untreated1,
+     xlab = "Log expression (treated)",
+     ylab = "Log expression (untreated)",
+     main = "Log Expression: Treated vs Untreated")
+
+abline(v = 4, col = "red", lty = 2) #treated    
+abline(h = 2, col = "blue", lty = 2) #untreated 
+
+candidate_genes <- rownames(cts_normlized)[d$treated1 > 4 & d$untreated1 < 2]
+print(candidate_genes)
+
+```
+
+Choose one of the genes you detected using visual inspection and plot the expression of this
+gene in all the conditions in this experiment. The x-axis should be a running index and the y-axis
+should be the expression of this gene in the three treated conditions and the four untreated
+conditions, in the same order as in the ‘cts’ matrix. Is the expression of this gene consistently
+different between all the treated and untreated conditions?
+```{r}
+
+gene_of_interest <- "FBgn0033065"
+
+gene_expr <- cts_normlized[gene_of_interest, ]
+
+plot(
+  gene_expr,
+  type = "b",         
+  xlab = "Sample Index",
+  ylab = "Expression",
+  main = paste("Expression of", gene_of_interest),
+  xaxt = "n"           
+)
+
+axis(1, at = 1:length(gene_expr), labels = colnames(cts_normlized), cex.axis = 0.7)
+
+cols <- c(rep("red", 3), rep("blue", 4))
+points(1:length(gene_expr), gene_expr, col = cols, pch = 16)
+lines(1:length(gene_expr), gene_expr, col = "black")
+
+```
+Answer: There is a change in the gene expression between the treated and untreated samples:
+in the treated samples, the gene expression is higher than in the untreated samples.
+
+read the abstract part of the manuscripts describing the R tool 'DEseq', which allows the
+detection of differentially expressed genes:
+Differential expression analysis for sequence count data
+Does the data we have fit the basic assumptions of DEseq?
+
+Answer:The data meet the fundamental assumptions of DESeq, as it follows a negative binomial distribution and exhibits variance greater than the mean.
+
+```{r}
+## install the package 'DESeq2'
+# copy and paste the lines below into R
+#if (!requireNamespace("BiocManager", quietly = TRUE))
+#install.packages("BiocManager")
+#BiocManager::install("DESeq2")
+
+```
+```{r}
+## use the installed library
+# copy and paste the line below into R
+library("DESeq2")
+
+```
+
+```{r}
+## use DESeq to detect the probability that each one of the genes is differentially expressed between the two conditions
+# copy and paste the following lines into R
+dds <- DESeqDataSetFromMatrix(countData = cts,
+colData = coldata,
+design = ~ condition)
+dds <- DESeq(dds)
+res <- results(dds)
+res
+
+```
+```{r}
+## the matrix 'res' contains the p-value for all the genes - sort the genes according to the p-value, such that lower p-values will appear first
+res_sort <- res[order(res$pvalue, decreasing = F), ]
+res_sort
+```
+detect 10 genes that are most different between the treated and untreated according to the
+obtained p-values. Display only the column ‘log2FoldChange’ (the log transformed fold change
+between the two conditions) and the column ‘padj’ (the adjusted p-value, see: Multiple
+comparisons problem) of these 10 genes. Is the gene that you detected using visual inspection
+among them?
+```{r}
+
+top10 <- res_sort[1:10, c("log2FoldChange", "padj")]
+top10
+
+#Is the gene that you detected using visual inspection among them?
+visual_gene <- "FBgn0033065"
+visual_gene %in% rownames(top10)
+```
+
+Part 5 - Detect rhythmical patterns using Fourier transform
+
+```{r}
+circadian_data <- read.csv("CircadianRNAseq.csv")
+circadian_data_matrix <- as.matrix(circadian_data)
+tail(circadian_data_matrix, n = 5)
+```
+Question: what is the time step?
+
+Answer:
+The time step here is 4 hours.
+
+Instructions:
+Plot the expression of the gene ‘per1a’ at all the time points. The x-axis labels should be all the time points (“A_11PM”…). In the plot show both the data points and a line that connects them.
+
+Question: Does the expression of this gene seem circadian? Read about the gene Per1 - should this gene be circadian?
+
+Answer:
+Yes, the expression of the Per1 gene exhibits a circadian rhythm because it is a core component of the molecular negative feedback loop that drives the 24-hour clock in nearly all organisms.
+
+
+```{r}
+per1a_index <- which(circadian_data_matrix[, "GeneSymbol"] == "per1a")
+plot(as.numeric(circadian_data_matrix[per1a_index, 2:13]), type = "o",xaxt = "n", xlab = "Time Point", ylab = "Normalized Count", col = "blue")
+axis(1, at = 1:12, labels = colnames(circadian_data_matrix)[2:13])
+```
+
+Instructions:
+We will convert the data from the time domain to the frequency domain to determine if the expression profile indeed corresponds to a 24 hr period. For the gene ‘per1a’, calculate, using the fast Fourier transform, the power (squared amplitude) of the different frequencies measured in this experiment. The aim is to generate the following plot (which clearly shows that the power in the circadian frequency 1/24 is the highest)
+
+
+```{r}
+per1a_expression_data <- circadian_data_matrix[per1a_index, 2:13]
+numeric_per1a_data <- as.numeric(per1a_expression_data) # Compute the fast discrete Fourier transform
+per1a_dft <- fft(numeric_per1a_data) # Compute the power of the discrete Fourier transform ny multiplying the complex conjugate values of the Fourier transform
+dft_power <- per1a_dft * Conj(per1a_dft)
+dft_power
+```
+
+
+```{r}
+relevant_power <- dft_power[2:7]
+
+normalized_power <- relevant_power / sum(relevant_power)
+normalized_power
+```
+
+
+
+```{r}
+data_length <- length(numeric_per1a_data) 
+
+time_interval <- 4
+
+sampling_frequency <- 1 / time_interval
+
+positive_frequencies <- seq(sampling_frequency / data_length, 
+                            sampling_frequency / 2, 
+                            length.out = data_length / 2)
+print(positive_frequencies)
+```
+
+
+
+
+```{r}
+plot(positive_frequencies, 
+     normalized_power, 
+     xlab = "Frequency (1 / hour)", 
+     ylab = "Normalized Power")
+```
+
+
+
+Question: 
+Assume that you want to improve the design of this experiment to better detect the circadian frequency using the FFT. Which option do you think is better: (a) to design an experiment in which the time step will be shorter, for example 2 hours between each time measurement, while keeping the overall measured time 48 hours. Or: (b) to increase the overall number of days measured, for example 4 days instead of 2 days, while keeping the time step the same.
+
+Answer:
+Option B is better because increasing the number of days measured improves the frequency resolution of the Fast Fourier Transform (FFT), making it easier to accurately distinguish and detect the precise 24-hour circadian period. Since the current 4-hour time step already satisfies the Nyquist criterion for detecting 24-hour rhythms, improving resolution is more beneficial than improving the maximum detectable frequency.
+
+
+Question: 
+discuss the potential advantages of detecting circadian genes in the frequency domain versus analyzing the data in the time domain (for example - by trying to fit the expression pattern of a gene with a cosine with 24 hours period).
+
+Answer:
+Analyzing gene expression in the frequency domain using the Fourier Transform is advantageous because it can simultaneously and robustly identify all underlying periodic components in noisy biological data, providing a comprehensive power spectrum of rhythms. This approach is more flexible and sensitive for detecting the precise frequency of the circadian rhythm compared to fitting a single, predefined 24-hour cosine wave in the time domain, which may miss non-ideal or complex oscillations.
+
+```{r}
+# Note: This code assumes 'circadian_data_matrix' is already loaded and available.
+
+# 1. Determine the index for the circadian frequency (1/24 cycles/hour)
+# N=12 total samples, dt=4 hours. Frequencies are: 1/48, 2/48 (1/24), 3/48, 4/48, 5/48, 6/48 (1/8=Nyquist).
+# The circadian frequency (1/24) corresponds to the 2nd index in the power spectrum vector (index 1 is the DC component).
+# We use array index 3 in R (since array index 1 is DC component, index 2 is 1/48, index 3 is 2/48 = 1/24).
+CIRCADIAN_INDEX <- 3
+
+# Function to compute normalized DFT power at the circadian frequency
+# It handles non-numeric data and all-zero data by returning NA
+calculate_circadian_power <- function(gene_expression) {
+  # Convert to numeric, suppressing coercion warnings
+  numeric_data <- as.numeric(gene_expression)
+  
+  # Check if data is entirely NA or all zeros (no rhythm detectable)
+  if (all(is.na(numeric_data)) || all(numeric_data == 0)) {
+    return(NA)
+  }
+  
+  # Compute the Discrete Fourier Transform (DFT)
+  dft_result <- fft(numeric_data)
+  
+  # Compute the power spectrum
+  power_spectrum_full <- dft_result * Conj(dft_result)
+  
+  # Normalized power by total power
+  # Note: sum is taken over the entire full spectrum
+  normalized_power <- power_spectrum_full / sum(power_spectrum_full)
+  
+  # Return the normalized power at the pre-determined circadian index
+  return(normalized_power[CIRCADIAN_INDEX])
+}
+
+# 2. Initialize a vector to store the circadian power for all genes
+num_genes <- dim(circadian_data_matrix)[1]
+circadian_power_vector <- numeric(num_genes)
+
+# 3. Process all genes and fill the power vector
+# Loop through each row (gene) in the data matrix
+for (i in 1:num_genes) {
+  # Columns 2:13 contain the time-course expression data
+  circadian_power_vector[i] <- calculate_circadian_power(circadian_data_matrix[i, 2:13])
+}
+
+# 4. Sort the genes by normalized circadian power
+
+# Use abs() to ensure the power (which might have minor complex remnants) is treated as a real number.
+# Use na.last = TRUE to ensure genes that could not be processed (NA) are ordered last.
+# Use decreasing = TRUE to get the highest power first.
+sorted_indices <- order(abs(circadian_power_vector), 
+                        decreasing = TRUE, 
+                        na.last = TRUE)
+
+# 5. Retrieve and print the GeneSymbols of the top 10 genes
+
+# Select the top 10 indices from the sorted list
+top_10_indices <- sorted_indices[1:10]
+
+# Retrieve the 'GeneSymbol' column for these top 10 rows
+top_10_gene_symbols <- circadian_data_matrix[top_10_indices, "GeneSymbol"]
+
+# Print the final result
+print("Top 10 Genes based on Normalized Circadian (1/24) FFT Power:")
+print(top_10_gene_symbols)
+
+```
+
+Answer:
+Among the top 10 genes identified by the Fourier analysis,per1a serves as a strong positive control since it is a well-established core component of the molecular circadian clock.  Furthermore, the gene nr1d2b is also highly ranked, which is highly significant because it codes for a nuclear hormone receptor (a member of the NR1D2 family) known to function as a transcriptional repressor involved in regulating both circadian rhythms and metabolic processes like carbohydrate and lipid metabolism.
+
+
+
+
+
